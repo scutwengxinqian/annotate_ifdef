@@ -1,0 +1,82 @@
+#!/home/utils/perl-5.10/5.10.0-nothreads-64/bin/perl
+# Usage: annotate_ifdef <language> <filename> ...
+# <language> can be: C, makepp, or Verilog
+
+use strict;
+
+if (@ARGV<2) {
+    die "Usage: annotate_ifdef <language> <filename> ..."
+}
+
+my $language = shift @ARGV;
+my @files = @ARGV;
+
+foreach my $file (@files) {
+    &annotate_if_endif($language, $file);
+}
+
+sub annotate_if_endif {
+	my $language = shift @_;
+	my $filename = shift @_;
+
+	print "Checking $filename $language.\n";
+	die "Fail to open file $filename:$!" unless open FH, '<', $filename;
+
+	my $level=0;
+	my $ln=0;
+	my @opens;
+
+	while(<FH>) {
+		$ln++;
+		my $edge = 0;
+		my %pattern = ( 
+			"c" => ['#(?:if|ifdef|ifndef)', '#endif'],
+			"makepp" => ['(?:ifdef|ifndef|ifeq|ifneq|ifperl|ifmakeperl|ifsys|ifnsys|iftrue|ifntrue)', 'endif'],
+			"verilog" => ['`(?:ifdef|ifndef)', '`endif'],
+		);
+
+		die "$language isn't supported." unless exists $pattern{lc $language};
+		my ($pattern_open, $pattern_close) = @{$pattern{lc $language}};
+		if (/^\s*$pattern_open\b/) { 
+			$level++;
+			push @opens, $ln;
+			$edge = 1;
+		}
+
+#		my $width = 4*$level + 2;
+#		printf "$ln:%-${width}d$_", $level;
+
+		if (/^\s*$pattern_close\b/) { 
+			$level--;
+			die "level < 0 at line $ln.\n" if ($level < 0);
+			pop @opens;
+			$edge = -1;
+		}
+		if ($edge == 0) {
+			foreach (@opens) {
+				print '|';
+			}
+		} elsif ($edge == 1) {
+			foreach (1 .. $level-1) {
+				print '|';
+			}
+			print "r";
+		} elsif ($edge == -1) {
+			foreach (@opens) {
+				print '|';
+			}
+			print "L";
+		}
+		print "\t$ln\t:$_";
+	}
+
+	if ($level==0) {
+		print "PASS\n";
+	} else {
+		print "ERROR: level = $level at end of file.\n";
+		print "ERROR: Condition block opened \@: @opens\n";
+		die;
+	}
+	close FH;
+}
+
